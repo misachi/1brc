@@ -19,3 +19,10 @@
 
 # Go workspace file
 go.work
+
+1brc.txt
+
+vendor
+
+__pycache__/*
+*.txt
