@@ -26,3 +26,6 @@ vendor
 
 __pycache__/*
 *.txt
+
+*.prof
+*.pdf
