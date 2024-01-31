@@ -1,14 +1,17 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log/slog"
 	"math"
 	"os"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -28,9 +31,9 @@ func min(x, y int) int {
 
 type Result struct {
 	num int
-	sum float32
-	min float32
-	max float32
+	sum int
+	min int
+	max int
 }
 
 // type Group struct {
@@ -51,10 +54,12 @@ type Segment struct {
 // 	group    Group
 // }
 
+var str_addr = flag.String("cpuprofile", "", "Write CPU profile to file")
+
 const (
-	NUM_THREADS = 8 //100000 // Assumption: Goroutines are relatively cheap and we can spin up as many
-	MAX_UNIQUE = 10000
-	LINE_TERM = '\n'
+	NUM_THREADS = 5000 // Assumption: Goroutines are relatively cheap and we can spin up as many
+	MAX_UNIQUE  = 10000
+	LINE_TERM   = '\n'
 )
 
 func unmap(b []byte) {
@@ -64,7 +69,25 @@ func unmap(b []byte) {
 	}
 }
 
-func parse_data(d []byte) (string, float32) {
+func parse_number(data []byte) int {
+	var num int
+	signbit := 1
+	size := len(data)
+	if data[0] == '-' {
+		signbit = -1
+		size -= 1
+		data = data[1:]
+	}
+	for k := 0; k < size; k++ {
+		if data[k] != '.' {
+			num = 10*num + int(data[k]-'0')
+		}
+	}
+	num *= signbit
+	return num
+}
+
+func parse_data(d []byte) (string, int) {
 	// sep := bytes.IndexByte(d, ';')
 	// if sep < 1 {
 	// 	panic(fmt.Sprintf("; symbol not found: %q", d))
@@ -79,7 +102,9 @@ func parse_data(d []byte) (string, float32) {
 			if err != nil {
 				panic(fmt.Sprintf("parse_data strconv.Atoi error: %v", err))
 			}
-			return *(*string)(unsafe.Pointer(&city)), float32(math.Round(temp * 10) / 10)
+			// temp := parse_number(d[i+1:])
+			return *(*string)(unsafe.Pointer(&city)), int(temp * 10)
+			// float32(math.Round(temp*10) / 10)
 		}
 	}
 	panic(fmt.Sprintf("; symbol not found: %q", d))
@@ -117,8 +142,10 @@ func process_segment(segment Segment) {
 		if segment.data[offset:][k] == LINE_TERM {
 			city, temp := parse_data(data[off:k])
 			if result, ok := segment.group[city]; ok {
-				result.max = float32(max(int(result.max * 10), int(temp * 10))) / 10
-				result.min = float32(min(int(result.min * 10), int(temp * 10))) / 10
+				// result.max = float32(max(int(result.max*10), int(temp*10))) / 10
+				// result.min = float32(min(int(result.min*10), int(temp*10))) / 10
+				result.max = max(result.max, temp)
+				result.min = min(result.min, temp)
 				result.num += 1
 				result.sum += temp
 			} else {
@@ -139,8 +166,10 @@ func mergeSegments(segments []Segment, results map[string]*Result) {
 	for _, segment := range segments {
 		for city, res := range segment.group {
 			if result, ok := results[city]; ok {
-				result.max = float32(max(int(result.max * 10), int(res.max * 10))) / 10
-				result.min = float32(min(int(result.min * 10), int(res.min * 10))) / 10
+				// result.max = float32(max(int(result.max*10), int(res.max*10))) / 10
+				// result.min = float32(min(int(result.min*10), int(res.min*10))) / 10
+				result.max = max(result.max, res.max)
+				result.min = min(result.min, res.min)
 				result.num += res.num
 				result.sum += res.sum
 			} else {
@@ -156,7 +185,21 @@ func mergeSegments(segments []Segment, results map[string]*Result) {
 }
 
 func main() {
+	flag.Parse()
 	var waitGroup sync.WaitGroup
+	now := time.Now()
+
+	if *str_addr != "" {
+		prof_file, err := os.Create(*str_addr)
+		if err != nil {
+			slog.Error("Unable to create profile flag")
+			os.Exit(1)
+		}
+		defer prof_file.Close()
+		pprof.StartCPUProfile(prof_file)
+		defer pprof.StopCPUProfile()
+	}
+
 	file, err := os.Open("data/measurements.txt")
 	if err != nil {
 		slog.Error("Error opening file: %v", err)
@@ -207,7 +250,7 @@ func main() {
 			segments[n].size += 1
 		}
 
-		segments[n].group = make(map[string]*Result, 150)
+		segments[n].group = make(map[string]*Result, 500)
 
 		waitGroup.Add(1)
 		go func(seg Segment) {
@@ -232,8 +275,14 @@ func main() {
 
 	for _, key := range keyList {
 		// City=<min>/<mean>/<max>
-		mean := math.Abs(float64(results[key].sum/float32(results[key].num)))
-		fmt.Printf("%s=%.1f/%.1f/%.1f\n", key, results[key].min, mean, results[key].max )
+		// mean := math.Abs(float64(results[key].sum / float32(results[key].num)))
+		res := results[key]
+		mean := math.Abs((float64(res.sum / 10)) / float64(res.num/10))
+		min := float64(res.min) / 10
+		max := float64(res.max) / 10
+		// fmt.Printf("%s=%.1f/%.1f/%.1f\n", key, results[key].min, mean, results[key].max)
+		fmt.Printf("%s=%.1f/%.1f/%.1f\n", key, min, mean, max)
 	}
+	fmt.Printf("\n\nIt took: %v\n", time.Now().Sub(now))
 
 }
