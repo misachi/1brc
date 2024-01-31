@@ -57,7 +57,7 @@ type Segment struct {
 var str_addr = flag.String("cpuprofile", "", "Write CPU profile to file")
 
 const (
-	NUM_THREADS = 5000 // Assumption: Goroutines are relatively cheap and we can spin up as many
+	NUM_THREADS = 16 
 	MAX_UNIQUE  = 10000
 	LINE_TERM   = '\n'
 )
